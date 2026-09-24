@@ -19,6 +19,9 @@ from tkinter import ttk, messagebox
 import threading
 import queue
 import datetime
+import random
+import time
+import math
 
 from opcua import Server, Client, ua
 
@@ -157,6 +160,8 @@ class ServerTab(ttk.Frame):
         self.namespace_idx = 2
         self._nodes = {}          # tree_item_id -> opcua Node
         self._refresh_id = None
+        self.temp_stop = threading.Event()
+        self._temp_thread = None
         self._build_ui()
 
     def _build_ui(self):
@@ -168,7 +173,7 @@ class ServerTab(ttk.Frame):
             row=0, column=0, sticky=tk.W, padx=5, pady=5
         )
         self.endpoint_var = tk.StringVar(
-            value="opc.tcp://0.0.0.0:4840/freeopcua/server/"
+            value="opc.tcp://127.0.0.1:6321/freeopcua/server/"
         )
         self.endpoint_entry = ttk.Entry(ctrl, textvariable=self.endpoint_var, width=45)
         self.endpoint_entry.grid(row=0, column=1, padx=5, pady=5)
@@ -266,12 +271,42 @@ class ServerTab(ttk.Frame):
         self.namespace_idx = self.server.register_namespace("http://my.server/")
 
         # Add a default temperature variable
-        temp = self.server.nodes.objects.add_variable(
-            self.namespace_idx, "Temperature", 0,
+        self.temp_node = self.server.nodes.objects.add_variable(
+            self.namespace_idx, "Temperature", 20,
             varianttype=ua.VariantType.Int32,
         )
-        temp.set_writable()
-        self._add_node_to_tree("Temperature", temp)
+        self.temp_node.set_writable()
+        self._add_node_to_tree("Temperature", self.temp_node)
+
+        # Add more 20 data variables
+        extra_vars = [
+            ("Date", ua.VariantType.String, datetime.datetime.now().strftime("%Y-%m-%d")),
+            ("Time", ua.VariantType.String, datetime.datetime.now().strftime("%H:%M:%S")),
+            ("Second", ua.VariantType.Int32, datetime.datetime.now().second),
+            ("Minute", ua.VariantType.Int32, datetime.datetime.now().minute),
+            ("Hour", ua.VariantType.Int32, datetime.datetime.now().hour),
+            ("DayOfWeek", ua.VariantType.Int32, datetime.datetime.now().weekday()),
+            ("Month", ua.VariantType.Int32, datetime.datetime.now().month),
+            ("Year", ua.VariantType.Int32, datetime.datetime.now().year),
+            ("Sine", ua.VariantType.Float, 0.0),
+            ("Cosine", ua.VariantType.Float, 0.0),
+            ("Tangent", ua.VariantType.Float, 0.0),
+            ("RandomFloat", ua.VariantType.Float, 0.0),
+            ("RandomInt", ua.VariantType.Int32, 0),
+            ("Pressure", ua.VariantType.Float, 101.3),
+            ("Humidity", ua.VariantType.Float, 55.5),
+            ("Speed", ua.VariantType.Float, 12.5),
+            ("Counter", ua.VariantType.Int32, 0),
+            ("Voltage", ua.VariantType.Float, 220.5),
+            ("Current", ua.VariantType.Float, 3.2),
+            ("Power", ua.VariantType.Float, 150.0),
+        ]
+        for name, vtype, init_val in extra_vars:
+            node = self.server.nodes.objects.add_variable(
+                self.namespace_idx, name, init_val, varianttype=vtype,
+            )
+            node.set_writable()
+            self._add_node_to_tree(name, node)
 
         try:
             self.server.start()
@@ -286,6 +321,9 @@ class ServerTab(ttk.Frame):
         self.logger.log("INFO", f"Server started at {endpoint}")
         self._set_server_running_state(True)
         self._schedule_refresh()
+        self.temp_stop.clear()
+        self._temp_thread = threading.Thread(target=self._update_variables, daemon=True)
+        self._temp_thread.start()
 
     def _stop(self):
         if self.server is not None:
@@ -297,6 +335,10 @@ class ServerTab(ttk.Frame):
 
         self._set_server_running_state(False)
         self._cancel_refresh()
+        self.temp_stop.set()
+        if self._temp_thread is not None:
+            self._temp_thread.join(timeout=1)
+            self._temp_thread = None
         self._nodes.clear()
         self.node_tree.delete(*self.node_tree.get_children())
 
@@ -380,6 +422,68 @@ class ServerTab(ttk.Frame):
             except Exception:
                 pass
         self._schedule_refresh()
+
+    def _update_variables(self):
+        while not self.temp_stop.is_set():
+            try:
+                # Temperature
+                if self.temp_node is not None:
+                    self.temp_node.set_value(random.randint(15, 35))
+
+                # Update extra variables continuously
+                t = time.time()
+                for item_id, node in self._nodes.items():
+                    try:
+                        name = item_id.replace("node_", "")
+                        if name == "Temperature":
+                            continue
+                        val = node.get_value()
+                        if name == "Sine":
+                            node.set_value(math.sin(t))
+                        elif name == "Cosine":
+                            node.set_value(math.cos(t))
+                        elif name == "Tangent":
+                            node.set_value(math.tan(t) if math.cos(t) != 0 else 0.0)
+                        elif name == "Second":
+                            node.set_value(datetime.datetime.now().second)
+                        elif name == "Minute":
+                            node.set_value(datetime.datetime.now().minute)
+                        elif name == "Hour":
+                            node.set_value(datetime.datetime.now().hour)
+                        elif name == "DayOfWeek":
+                            node.set_value(datetime.datetime.now().weekday())
+                        elif name == "Month":
+                            node.set_value(datetime.datetime.now().month)
+                        elif name == "Year":
+                            node.set_value(datetime.datetime.now().year)
+                        elif name == "Date":
+                            node.set_value(datetime.datetime.now().strftime("%Y-%m-%d"))
+                        elif name == "Time":
+                            node.set_value(datetime.datetime.now().strftime("%H:%M:%S"))
+                        elif name == "RandomFloat":
+                            node.set_value(random.uniform(0, 100))
+                        elif name == "RandomInt":
+                            node.set_value(random.randint(0, 1000))
+                        elif name == "Counter":
+                            current = node.get_value() if node.get_value() is not None else 0
+                            node.set_value((current + 1) % 1000)
+                        elif name == "Pressure":
+                            node.set_value(101.3 + random.uniform(-5, 5))
+                        elif name == "Humidity":
+                            node.set_value(random.uniform(30, 90))
+                        elif name == "Speed":
+                            node.set_value(random.uniform(0, 120))
+                        elif name == "Voltage":
+                            node.set_value(220 + random.uniform(-10, 10))
+                        elif name == "Current":
+                            node.set_value(random.uniform(0, 10))
+                        elif name == "Power":
+                            node.set_value(random.uniform(50, 300))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            time.sleep(0.5)
 
     def _cancel_refresh(self):
         if self._refresh_id:
@@ -738,11 +842,29 @@ class MainApp(tk.Tk):
         notebook = ttk.Notebook(self)
         notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        server_tab = ServerTab(notebook)
-        client_tab = ClientTab(notebook)
+        self.server_tab = ServerTab(notebook)
+        self.client_tab = ClientTab(notebook)
 
-        notebook.add(server_tab, text="  Server  ")
-        notebook.add(client_tab, text="  Client  ")
+        notebook.add(self.server_tab, text="  Server  ")
+        notebook.add(self.client_tab, text="  Client  ")
+
+        # Ensure clean shutdown when window is closed
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        # Stop server if running
+        if self.server_tab is not None:
+            self.server_tab._stop()
+        # Disconnect client if connected
+        if self.client_tab is not None:
+            if self.client_tab.client is not None:
+                try:
+                    self.client_tab.client.disconnect()
+                except Exception:
+                    pass
+                self.client_tab.client = None
+            self.client_tab._connected = False
+        self.destroy()
 
 
 if __name__ == "__main__":
