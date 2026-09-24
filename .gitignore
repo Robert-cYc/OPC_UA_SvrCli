@@ -1,0 +1,8 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# PyInstaller (build output, not committed)
+build/
+dist/
