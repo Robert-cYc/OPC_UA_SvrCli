@@ -651,9 +651,10 @@ class ClientTab(ttk.Frame):
         try:
             objects = self.client.nodes.objects
             node_id_str = objects.nodeid.to_string()
-            # Insert a dummy child so the expand arrow appears.
-            self.tree.insert(node_id_str, "end", "")
+            # Insert root item first, then dummy child for expand arrow
             self.tree.insert("", "end", node_id_str, text="Objects")
+            dummy_id = f"dummy_{node_id_str}"
+            self.tree.insert(node_id_str, "end", dummy_id, text="")
         except Exception as exc:
             self.logger.log("ERROR", f"Failed to browse root: {exc}")
 
@@ -688,11 +689,12 @@ class ClientTab(ttk.Frame):
                     display_name = getattr(browse_name, "Name", str(child_id))
                 except Exception:
                     display_name = str(child_id)
-                # Insert dummy child for folders so expand arrow shows
+                # Insert item first, then dummy child for folders
                 is_folder = self._is_folder(child)
-                if is_folder:
-                    self.tree.insert(child_id, "end", "")
                 self.tree.insert(node_id_str, "end", child_id, text=display_name)
+                if is_folder:
+                    dummy_child_id = f"dummy_{child_id}"
+                    self.tree.insert(child_id, "end", dummy_child_id, text="")
         except Exception as exc:
             self.logger.log("ERROR", f"Failed to load children of {node_id_str}: {exc}")
 
