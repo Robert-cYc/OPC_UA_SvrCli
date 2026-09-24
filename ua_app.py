@@ -25,6 +25,16 @@ import math
 
 from opcua import Server, Client, ua
 
+# Make tabs visually distinct with bright colors
+style = ttk.Style()
+try:
+    style.theme_use("clam")
+except tk.TclError:
+    pass
+style.configure("TNotebook", background="#e8e8e8", borderwidth=3)
+style.configure("TNotebook.Tab", background="#c0c0c0", foreground="#000000", font=("Segoe UI", 10, "bold"))
+style.map("TNotebook.Tab", background=[("selected", "#4a90e2"), ("active", "#6ab0de")])
+
 
 # ---------------------------------------------------------------------------
 # Data type helpers
@@ -111,6 +121,11 @@ class LoggerWidget(ttk.LabelFrame):
             text_frame, height=10, state=tk.DISABLED,
             font=("Consolas", 9), wrap=tk.WORD,
         )
+        # Color tags for different log levels
+        self.text.tag_configure("INFO", foreground="#2e86de")
+        self.text.tag_configure("ERROR", foreground="#d32f2f", font=("Consolas", 9, "bold"))
+        self.text.tag_configure("WARN", foreground="#f39c12", font=("Consolas", 9, "bold"))
+        self.text.tag_configure("DEBUG", foreground="#7f8c8d")
         vsb = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.text.yview)
         self.text.configure(yscrollcommand=vsb.set)
         self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -123,7 +138,18 @@ class LoggerWidget(ttk.LabelFrame):
             while True:
                 msg = self._log_queue.get_nowait()
                 self.text.configure(state=tk.NORMAL)
-                self.text.insert(tk.END, msg + "\n")
+                # Determine tag based on level in message
+                tag = ""
+                if "[INFO" in msg:
+                    tag = "INFO"
+                elif "[ERROR" in msg:
+                    tag = "ERROR"
+                elif "[WARN" in msg:
+                    tag = "WARN"
+                elif "[DEBUG" in msg:
+                    tag = "DEBUG"
+                end_idx = self.text.index(tk.END + "-1c")
+                self.text.insert(tk.END, msg + "\n", tag)
                 self.text.configure(state=tk.DISABLED)
                 if self.auto_scroll.get():
                     self.text.see(tk.END)
@@ -428,7 +454,7 @@ class ServerTab(ttk.Frame):
             try:
                 # Temperature
                 if self.temp_node is not None:
-                    self.temp_node.set_value(random.randint(15, 35))
+                    self.temp_node.set_value(random.randint(-100, 500))
 
                 # Update extra variables continuously
                 t = time.time()
