@@ -25,15 +25,6 @@ import math
 
 from opcua import Server, Client, ua
 
-# Make tabs visually distinct with bright colors
-style = ttk.Style()
-try:
-    style.theme_use("clam")
-except tk.TclError:
-    pass
-style.configure("TNotebook", background="#e8e8e8", borderwidth=3)
-style.configure("TNotebook.Tab", background="#c0c0c0", foreground="#000000", font=("Segoe UI", 10, "bold"))
-style.map("TNotebook.Tab", background=[("selected", "#4a90e2"), ("active", "#6ab0de")])
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +317,11 @@ class ServerTab(ttk.Frame):
             ("Voltage", ua.VariantType.Float, 220.5),
             ("Current", ua.VariantType.Float, 3.2),
             ("Power", ua.VariantType.Float, 150.0),
+            ("osName", ua.VariantType.String, "Microsoft Windows 11 Pro"),
+            ("osVersion", ua.VariantType.String, "10.0.26200 N/A Build 26200"),
+            ("systemManufacturer", ua.VariantType.String, "Acer"),
+            ("systemModel", ua.VariantType.String, "Predator PTN16-51"),
+            ("totalPhysicalMemory", ua.VariantType.String, "32,253 MB"),
         ]
         for name, vtype, init_val in extra_vars:
             node = self.server.nodes.objects.add_variable(
@@ -863,7 +859,18 @@ class MainApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("OPC UA Server & Client")
-        self.geometry("780x820")
+        self.geometry("1000x900")
+        
+        # Make tabs visually distinct with bright colors
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure("TNotebook", background="#e8e8e8", borderwidth=3)
+        style.configure("TNotebook.Tab", background="#c0c0c0", foreground="#000000", font=("Segoe UI", 10, "bold"))
+        style.map("TNotebook.Tab", background=[("selected", "#4a90e2"), ("active", "#6ab0de")])
+        
         self._build_ui()
 
     def _build_ui(self):
