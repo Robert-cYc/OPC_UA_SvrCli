@@ -22,6 +22,10 @@ import datetime
 import random
 import time
 import math
+import socket
+import os
+import sys
+import psutil
 
 from opcua import Server, Client, ua
 
@@ -345,6 +349,37 @@ class ServerTab(ttk.Frame):
             ("systemModel", ua.VariantType.String, "Predator PTN16-51"),
             ("totalPhysicalMemory", ua.VariantType.String, "32,253 MB"),
         ]
+        
+        try:
+            hostname = socket.gethostname()
+            ip_address = socket.gethostbyname(hostname)
+        except Exception:
+            hostname = "Unknown"
+            ip_address = "Unknown"
+            
+        boot_time = datetime.datetime.fromtimestamp(psutil.boot_time()).strftime("%Y-%m-%d %H:%M:%S")
+
+        extra_vars.extend([
+            ("IPAddress", ua.VariantType.String, ip_address),
+            ("Hostname", ua.VariantType.String, hostname),
+            ("CPU_CoreCount", ua.VariantType.Int32, psutil.cpu_count(logical=True) or 0),
+            ("CPU_UsagePercent", ua.VariantType.Float, 0.0),
+            ("Memory_TotalGB", ua.VariantType.Float, round(psutil.virtual_memory().total / (1024**3), 2)),
+            ("Memory_AvailableGB", ua.VariantType.Float, round(psutil.virtual_memory().available / (1024**3), 2)),
+            ("Memory_UsagePercent", ua.VariantType.Float, psutil.virtual_memory().percent),
+            ("Disk_TotalGB", ua.VariantType.Float, round(psutil.disk_usage('/').total / (1024**3), 2)),
+            ("Disk_FreeGB", ua.VariantType.Float, round(psutil.disk_usage('/').free / (1024**3), 2)),
+            ("Disk_UsagePercent", ua.VariantType.Float, psutil.disk_usage('/').percent),
+            ("Python_Version", ua.VariantType.String, sys.version.split(' ')[0]),
+            ("Process_ID", ua.VariantType.Int32, os.getpid()),
+            ("Thread_Count", ua.VariantType.Int32, threading.active_count()),
+            ("System_BootTime", ua.VariantType.String, boot_time),
+            ("Network_BytesSent", ua.VariantType.Int64, psutil.net_io_counters().bytes_sent),
+            ("Network_BytesRecv", ua.VariantType.Int64, psutil.net_io_counters().bytes_recv),
+            ("Network_BytesSent_PerSec", ua.VariantType.Float, 0.0),
+            ("Network_BytesRecv_PerSec", ua.VariantType.Float, 0.0),
+        ])
+
         for name, vtype, init_val in extra_vars:
             node = self.observer_folder.add_variable(
                 self.namespace_idx, name, init_val, varianttype=vtype,
@@ -513,8 +548,22 @@ class ServerTab(ttk.Frame):
         self._schedule_refresh()
 
     def _update_variables(self):
+        last_net = psutil.net_io_counters()
+        last_time = time.time()
         while not self.temp_stop.is_set():
             try:
+                current_time = time.time()
+                current_net = psutil.net_io_counters()
+                time_diff = current_time - last_time
+                if time_diff > 0:
+                    bytes_sent_per_sec = (current_net.bytes_sent - last_net.bytes_sent) / time_diff
+                    bytes_recv_per_sec = (current_net.bytes_recv - last_net.bytes_recv) / time_diff
+                else:
+                    bytes_sent_per_sec = 0.0
+                    bytes_recv_per_sec = 0.0
+                last_time = current_time
+                last_net = current_net
+
                 # Temperature
                 if self.temp_node is not None:
                     self.temp_node.set_value(random.randint(-100, 500))
@@ -568,6 +617,26 @@ class ServerTab(ttk.Frame):
                             node.set_value(random.uniform(0, 10))
                         elif name == "Power":
                             node.set_value(random.uniform(50, 300))
+                        elif name == "CPU_UsagePercent":
+                            node.set_value(float(psutil.cpu_percent(interval=None)))
+                        elif name == "Memory_AvailableGB":
+                            node.set_value(float(round(psutil.virtual_memory().available / (1024**3), 2)))
+                        elif name == "Memory_UsagePercent":
+                            node.set_value(float(psutil.virtual_memory().percent))
+                        elif name == "Disk_FreeGB":
+                            node.set_value(float(round(psutil.disk_usage('/').free / (1024**3), 2)))
+                        elif name == "Disk_UsagePercent":
+                            node.set_value(float(psutil.disk_usage('/').percent))
+                        elif name == "Thread_Count":
+                            node.set_value(int(threading.active_count()))
+                        elif name == "Network_BytesSent":
+                            node.set_value(int(current_net.bytes_sent))
+                        elif name == "Network_BytesRecv":
+                            node.set_value(int(current_net.bytes_recv))
+                        elif name == "Network_BytesSent_PerSec":
+                            node.set_value(float(round(bytes_sent_per_sec, 2)))
+                        elif name == "Network_BytesRecv_PerSec":
+                            node.set_value(float(round(bytes_recv_per_sec, 2)))
                     except Exception:
                         pass
             except Exception:
