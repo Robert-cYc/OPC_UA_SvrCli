@@ -248,6 +248,12 @@ class ServerTab(ttk.Frame):
         )
         self.add_var_btn.grid(row=0, column=6, padx=5, pady=2)
 
+        self.update_var_btn = ttk.Button(
+            var_frame, text="Update Value",
+            command=self._update_variable, state=tk.DISABLED,
+        )
+        self.update_var_btn.grid(row=0, column=7, padx=5, pady=2)
+
         # --- Node Tree ---
         tree_frame = ttk.Frame(var_frame)
         self.node_tree = ttk.Treeview(
@@ -264,6 +270,9 @@ class ServerTab(ttk.Frame):
         self.node_tree.configure(yscrollcommand=vsb.set)
         self.node_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.node_tree.bind("<<TreeviewSelect>>", self._on_server_node_select)
+        
         tree_frame.grid(
             row=1, column=0, columnspan=7, padx=5, pady=5, sticky=tk.NSEW
         )
@@ -283,12 +292,25 @@ class ServerTab(ttk.Frame):
             return
 
         self.server = Server()
+
+        # Hook into create_session to log when a client connects
+        original_create_session = self.server.iserver.create_session
+        def patched_create_session(name, *args, **kwargs):
+            session = original_create_session(name, *args, **kwargs)
+            self.logger.log("INFO", f"Client connected: Session '{name}'")
+            return session
+        self.server.iserver.create_session = patched_create_session
+
         self.server.set_endpoint(endpoint)
         self.server.set_server_name(server_name)
         self.namespace_idx = self.server.register_namespace("http://my.server/")
 
+        # Add an Observer folder to store variables
+        # Note: It must be added to the 'objects' folder, otherwise standard clients like UaExpert will not see it!
+        self.observer_folder = self.server.nodes.objects.add_object(self.namespace_idx, "Observer")
+
         # Add a default temperature variable
-        self.temp_node = self.server.nodes.objects.add_variable(
+        self.temp_node = self.observer_folder.add_variable(
             self.namespace_idx, "Temperature", 20,
             varianttype=ua.VariantType.Int32,
         )
@@ -324,7 +346,7 @@ class ServerTab(ttk.Frame):
             ("totalPhysicalMemory", ua.VariantType.String, "32,253 MB"),
         ]
         for name, vtype, init_val in extra_vars:
-            node = self.server.nodes.objects.add_variable(
+            node = self.observer_folder.add_variable(
                 self.namespace_idx, name, init_val, varianttype=vtype,
             )
             node.set_writable()
@@ -368,6 +390,7 @@ class ServerTab(ttk.Frame):
         self.start_btn.config(state=tk.DISABLED if running else tk.NORMAL)
         self.stop_btn.config(state=tk.NORMAL if running else tk.DISABLED)
         self.add_var_btn.config(state=tk.NORMAL if running else tk.DISABLED)
+        self.update_var_btn.config(state=tk.NORMAL if running else tk.DISABLED)
         self.endpoint_entry.config(state=tk.DISABLED if running else tk.NORMAL)
 
     # -- Variable Management --
@@ -395,7 +418,7 @@ class ServerTab(ttk.Frame):
             return
 
         try:
-            node = self.server.nodes.objects.add_variable(
+            node = self.observer_folder.add_variable(
                 self.namespace_idx, name, initial_value,
                 varianttype=variant_type,
             )
@@ -425,6 +448,50 @@ class ServerTab(ttk.Frame):
             "", "end", item_id, text=name,
             values=(type_name, val_str),
         )
+
+    def _update_variable(self):
+        selected = self.node_tree.selection()
+        if not selected:
+            messagebox.showerror("Error", "Please select a variable to update.")
+            return
+            
+        item_id = selected[0]
+        node = self._nodes.get(item_id)
+        if not node:
+            return
+
+        value_str = self.var_value_var.get().strip()
+        type_name = self.var_type_var.get()
+        
+        try:
+            val, _ = parse_value(type_name, value_str)
+            node.set_value(val)
+            name = self.node_tree.item(item_id, "text")
+            self.logger.log("INFO", f"Updated variable '{name}' to {val}")
+        except Exception as exc:
+            self.logger.log("ERROR", f"Failed to update variable: {exc}")
+            messagebox.showerror("Error", f"Failed to update variable:\n{exc}")
+
+    def _on_server_node_select(self, event):
+        selected = self.node_tree.selection()
+        if not selected:
+            return
+        item_id = selected[0]
+        name = self.node_tree.item(item_id, "text")
+        values = self.node_tree.item(item_id, "values")
+        if values:
+            type_name = values[0]
+            val_str = values[1]
+            self.var_name_var.set(name)
+            self.var_value_var.set(val_str)
+            # Map python type names back to OPC UA UI type names if possible
+            type_map = {
+                'bool': 'Boolean', 'int': 'Int32', 'float': 'Float', 'str': 'String'
+            }
+            if type_name in type_map:
+                self.var_type_var.set(type_map[type_name])
+            elif type_name in TYPE_NAMES:
+                self.var_type_var.set(type_name)
 
     # -- Periodic Value Refresh --
 
@@ -682,10 +749,7 @@ class ClientTab(ttk.Frame):
 
     def _on_tree_expand(self, event):
         """Lazy-load children when a tree node is expanded."""
-        selected = self.tree.selection()
-        if not selected:
-            return
-        item_id = selected[0]
+        item_id = self.tree.focus()
         if not item_id:
             return
         if item_id in self._loaded_nodes:
